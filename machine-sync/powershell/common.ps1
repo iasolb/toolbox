@@ -9,6 +9,10 @@ $ErrorActionPreference = 'Stop'
 $NativeOpenSsh = Join-Path $env:SystemRoot 'System32\OpenSSH'
 $SshExe = if (Test-Path (Join-Path $NativeOpenSsh 'ssh.exe')) { Join-Path $NativeOpenSsh 'ssh.exe' } else { 'ssh' }
 $ScpExe = if (Test-Path (Join-Path $NativeOpenSsh 'scp.exe')) { Join-Path $NativeOpenSsh 'scp.exe' } else { 'scp' }
+# Same shadowing problem hits tar: Git's GNU tar cannot handle C:\ paths in
+# -C, while the Windows-native bsdtar in System32 handles them fine.
+$NativeTar = Join-Path $env:SystemRoot 'System32\tar.exe'
+$TarExe = if (Test-Path $NativeTar) { $NativeTar } else { 'tar' }
 
 function Get-MachineSyncConfigPath {
     if ($env:MACHINE_SYNC_CONFIG) {
@@ -99,15 +103,24 @@ function Split-PeerPath {
     return @{ Parent = $parent; Leaf = $trimmed.Substring($idx + 1) }
 }
 
+# ssh exits 255 for its own failures (resolution, connection, auth); remote
+# test commands exit 0/1. Treating 255 as "false" would misroute transfers
+# (e.g. tar-pulling a directory via the scp path), so it aborts instead.
 function Test-PeerDirectory {
     param([string]$PeerHost, [string]$RemotePath)
-    & $SshExe $PeerHost "test -d '$RemotePath'" | Out-Null
+    & $SshExe -n $PeerHost "test -d '$RemotePath'" | Out-Null
+    if ($LASTEXITCODE -eq 255) {
+        throw "cannot reach $PeerHost over ssh, nothing was transferred"
+    }
     return $LASTEXITCODE -eq 0
 }
 
 function Test-PeerExists {
     param([string]$PeerHost, [string]$RemotePath)
-    & $SshExe $PeerHost "test -e '$RemotePath'" | Out-Null
+    & $SshExe -n $PeerHost "test -e '$RemotePath'" | Out-Null
+    if ($LASTEXITCODE -eq 255) {
+        throw "cannot reach $PeerHost over ssh, nothing was transferred"
+    }
     return $LASTEXITCODE -eq 0
 }
 
@@ -124,14 +137,16 @@ function Confirm-PushDestination {
 
     Write-Host "Destination already exists: ${PeerHost}:$RemoteTarget" -ForegroundColor Yellow
     Write-Host 'Current contents there:'
-    & $SshExe $PeerHost "ls -la '$RemoteTarget'"
+    & $SshExe -n $PeerHost "ls -la '$RemoteTarget'"
     Write-Host ''
     Write-Host 'This push will overwrite any file with a matching name.'
     Write-Host 'Anything already there that is NOT part of this push is left as-is (not deleted).'
     Write-Host ''
 
+    # fail closed: Read-Host returns $null at stdin EOF, and $null -notmatch
+    # evaluates false, so a bare -notmatch check would push without consent
     $reply = Read-Host 'Continue with push? [y/N]'
-    if ($reply -notmatch '^(?i:y|yes)$') {
+    if (-not $reply -or $reply -notmatch '^(?i:y|yes)$') {
         Write-Host 'Aborted, nothing was pushed.' -ForegroundColor Red
         exit 1
     }
@@ -164,7 +179,7 @@ function Invoke-TarPull {
     # remote shell is POSIX, so single-quoted excludes are safe there
     $excludeStr = Get-ExcludeFlagString $ExcludePatterns "'"
     $remoteCmd = "tar -czf -$excludeStr -C '$RemoteParent' '$RemoteLeaf'"
-    $cmdLine = "$SshExe $PeerHost `"$remoteCmd`" | tar -xzf - -C `"$LocalDest`""
+    $cmdLine = "$SshExe -n $PeerHost `"$remoteCmd`" | $TarExe -xzf - -C `"$LocalDest`""
     cmd /c $cmdLine
     if ($LASTEXITCODE -ne 0) {
         throw "tar pull failed (exit $LASTEXITCODE)"
@@ -184,7 +199,7 @@ function Invoke-TarPush {
     # local tar runs under cmd.exe, which treats single quotes as literal
     # characters, so local excludes must be double-quoted
     $excludeStr = Get-ExcludeFlagString $ExcludePatterns '"'
-    $cmdLine = "tar -czf -$excludeStr -C `"$LocalParent`" `"$LocalLeaf`" | $SshExe $PeerHost `"tar -xzf - -C '$RemoteDest'`""
+    $cmdLine = "$TarExe -czf -$excludeStr -C `"$LocalParent`" `"$LocalLeaf`" | $SshExe $PeerHost `"tar -xzf - -C '$RemoteDest'`""
     cmd /c $cmdLine
     if ($LASTEXITCODE -ne 0) {
         throw "tar push failed (exit $LASTEXITCODE)"
@@ -215,9 +230,13 @@ function Invoke-CsvEnsureOnPeer {
         Write-Host "csv-utf8: missing $script, skipping conversion" -ForegroundColor Yellow
         return
     }
-    & $SshExe $PeerHost 'command -v python3' | Out-Null
+    # actually run python3, not just find it: on a Mac without Xcode CLT the
+    # xcode-select shim exists on PATH but fails on execution. The probe runs
+    # under cmd so the shim's stderr never becomes PowerShell error records
+    # (terminating under ErrorActionPreference Stop).
+    cmd /c "$SshExe -n $PeerHost `"python3 --version`" >nul 2>&1"
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "csv-utf8: no python3 on $PeerHost, skipping conversion" -ForegroundColor Yellow
+        Write-Host "csv-utf8: no working python3 on $PeerHost, skipping conversion" -ForegroundColor Yellow
         return
     }
     # stream the script over ssh so the peer needs python3 but not this repo
@@ -247,7 +266,8 @@ function Invoke-MachineSyncPull {
     if (Test-PeerDirectory $Config.PeerHost $remoteFull) {
         Invoke-TarPull -PeerHost $Config.PeerHost -RemoteParent $split.Parent -RemoteLeaf $split.Leaf -LocalDest $DestDir -ExcludePatterns (Get-ExcludePatterns)
     } else {
-        & $ScpExe "$($Config.PeerHost):'$remoteFull'" "$DestDir\"
+        # no quote-wrapping: scp 9.x speaks SFTP, remote paths are literal
+        & $ScpExe "$($Config.PeerHost):$remoteFull" "$DestDir\"
         if ($LASTEXITCODE -ne 0) {
             throw "scp failed (exit $LASTEXITCODE)"
         }
@@ -277,14 +297,14 @@ function Invoke-MachineSyncPush {
     $finalTarget = "$($remoteDest.TrimEnd('/'))/$leafName"
     Confirm-PushDestination -PeerHost $Config.PeerHost -RemoteTarget $finalTarget
 
-    & $SshExe $Config.PeerHost "mkdir -p '$remoteDest'" | Out-Null
+    & $SshExe -n $Config.PeerHost "mkdir -p '$remoteDest'" | Out-Null
 
     if (Test-Path $localFull -PathType Container) {
         Write-Host "$CommandName $FromValue -> $($Config.PeerHost):$finalTarget"
         Invoke-TarPush -PeerHost $Config.PeerHost -LocalParent (Split-Path $localFull -Parent) -LocalLeaf $leafName -RemoteDest $remoteDest -ExcludePatterns (Get-ExcludePatterns)
     } else {
         Write-Host "$CommandName $FromValue -> $($Config.PeerHost):$remoteDest/"
-        & $ScpExe $localFull "$($Config.PeerHost):'$remoteDest/'"
+        & $ScpExe $localFull "$($Config.PeerHost):$remoteDest/"
         if ($LASTEXITCODE -ne 0) {
             throw "scp failed (exit $LASTEXITCODE)"
         }

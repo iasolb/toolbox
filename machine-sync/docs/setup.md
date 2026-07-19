@@ -83,8 +83,8 @@ Optional personal ignore list: `~/.machinesync-ignore` (falls back to
 - Symlinks arrive as zero-byte files.
 - Existing same-name files are overwritten; extra files at the destination
   are never deleted.
-- Paths with spaces: fine for tar transfers, avoid for single-file scp to
-  the PC (cmd-side quoting is unreliable there).
+- scp 9.x (both machines) defaults to SFTP mode: remote paths are literal,
+  so never quote-wrap them in scripts; spaces are fine unquoted.
 
 ## End-to-end test checklist
 

@@ -78,20 +78,28 @@ resolve_local_path() {
     esac
 }
 
+# ssh exits 255 for its own failures (resolution, connection, auth); remote
+# probes exit 0/1. Treating 255 as "false" would misroute transfers, so die.
 peer_is_dir() {
-    ssh "$PEER_HOST" "powershell -NoProfile -Command \"exit [int](-not (Test-Path -LiteralPath '$1' -PathType Container))\"" >/dev/null 2>&1
+    ssh -n "$PEER_HOST" "powershell -NoProfile -Command \"exit [int](-not (Test-Path -LiteralPath '$1' -PathType Container))\"" >/dev/null 2>&1
+    local rc=$?
+    [ "$rc" -eq 255 ] && die "cannot reach $PEER_HOST over ssh, nothing was transferred"
+    return "$rc"
 }
 
 peer_exists() {
-    ssh "$PEER_HOST" "powershell -NoProfile -Command \"exit [int](-not (Test-Path -LiteralPath '$1'))\"" >/dev/null 2>&1
+    ssh -n "$PEER_HOST" "powershell -NoProfile -Command \"exit [int](-not (Test-Path -LiteralPath '$1'))\"" >/dev/null 2>&1
+    local rc=$?
+    [ "$rc" -eq 255 ] && die "cannot reach $PEER_HOST over ssh, nothing was transferred"
+    return "$rc"
 }
 
 peer_listing() {
-    ssh "$PEER_HOST" "powershell -NoProfile -Command \"Get-ChildItem -Force -LiteralPath '$1'\""
+    ssh -n "$PEER_HOST" "powershell -NoProfile -Command \"Get-ChildItem -Force -LiteralPath '$1'\""
 }
 
 peer_mkdir() {
-    ssh "$PEER_HOST" "powershell -NoProfile -Command \"[void](New-Item -ItemType Directory -Force -Path '$1')\"" >/dev/null
+    ssh -n "$PEER_HOST" "powershell -NoProfile -Command \"[void](New-Item -ItemType Directory -Force -Path '$1')\"" >/dev/null
 }
 
 confirm_push_destination() {
@@ -123,7 +131,7 @@ tar_pull() {
             flags="$flags --exclude=\"$p\""
         done
     fi
-    ssh "$PEER_HOST" "tar -czf -$flags -C \"$parent\" \"$leaf\"" | tar -xzf - -C "$dest"
+    ssh -n "$PEER_HOST" "tar -czf -$flags -C \"$parent\" \"$leaf\"" | tar -xzf - -C "$dest"
 }
 
 # tar_push <local_parent> <local_leaf> <remote_dest>
