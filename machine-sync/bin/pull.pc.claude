@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/common.sh"
+load_config
+
+usage() {
+    echo 'Usage: pull.pc.claude --from <pc path> [--csv]'
+    echo "  --from resolves against the PC root ($PEER_ROOT) unless it starts with a drive letter."
+    echo "  Always lands in the claude working dir: $CLAUDE_DIR/<leaf>."
+    echo '  --csv runs transferred .csv files through the UTF-8 ensurer afterwards.'
+}
+
+FROM=''
+CSV=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --from)
+            shift
+            [ $# -gt 0 ] || die 'Missing value after --from'
+            FROM="$1"
+            ;;
+        --csv) CSV=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "Unexpected argument: $1" ;;
+    esac
+    shift
+done
+
+if [ -z "$FROM" ]; then
+    echo 'pull.pc.claude requires --from <pc path>. Nothing was pulled.' >&2
+    usage
+    exit 1
+fi
+
+machine_sync_pull 'pull.pc.claude' "$FROM" "$CLAUDE_DIR" "$CSV"

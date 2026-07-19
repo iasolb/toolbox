@@ -1,0 +1,8 @@
+# Wayfair-derived reference copy, kept locally but not published
+workbench-sync-master/
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+.venv/

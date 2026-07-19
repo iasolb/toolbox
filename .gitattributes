@@ -1,0 +1,6 @@
+# Shell/python must stay LF (CRLF breaks shebangs on the Mac); PowerShell gets CRLF.
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+machine-sync/bin/* text eol=lf
+*.ps1 text eol=crlf
