@@ -1,6 +1,15 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Git for Windows can shadow the native OpenSSH client on PATH, and its ssh
+# cannot resolve .local mDNS names (the Mac's stable address), so pin the
+# native client explicitly. Paths contain no spaces on purpose: these get
+# embedded unquoted in cmd.exe pipelines, where a leading quoted token
+# triggers cmd's outer-quote stripping.
+$NativeOpenSsh = Join-Path $env:SystemRoot 'System32\OpenSSH'
+$SshExe = if (Test-Path (Join-Path $NativeOpenSsh 'ssh.exe')) { Join-Path $NativeOpenSsh 'ssh.exe' } else { 'ssh' }
+$ScpExe = if (Test-Path (Join-Path $NativeOpenSsh 'scp.exe')) { Join-Path $NativeOpenSsh 'scp.exe' } else { 'scp' }
+
 function Get-MachineSyncConfigPath {
     if ($env:MACHINE_SYNC_CONFIG) {
         return $env:MACHINE_SYNC_CONFIG
@@ -92,13 +101,13 @@ function Split-PeerPath {
 
 function Test-PeerDirectory {
     param([string]$PeerHost, [string]$RemotePath)
-    ssh $PeerHost "test -d '$RemotePath'" | Out-Null
+    & $SshExe $PeerHost "test -d '$RemotePath'" | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
 function Test-PeerExists {
     param([string]$PeerHost, [string]$RemotePath)
-    ssh $PeerHost "test -e '$RemotePath'" | Out-Null
+    & $SshExe $PeerHost "test -e '$RemotePath'" | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
@@ -115,7 +124,7 @@ function Confirm-PushDestination {
 
     Write-Host "Destination already exists: ${PeerHost}:$RemoteTarget" -ForegroundColor Yellow
     Write-Host 'Current contents there:'
-    ssh $PeerHost "ls -la '$RemoteTarget'"
+    & $SshExe $PeerHost "ls -la '$RemoteTarget'"
     Write-Host ''
     Write-Host 'This push will overwrite any file with a matching name.'
     Write-Host 'Anything already there that is NOT part of this push is left as-is (not deleted).'
@@ -155,7 +164,7 @@ function Invoke-TarPull {
     # remote shell is POSIX, so single-quoted excludes are safe there
     $excludeStr = Get-ExcludeFlagString $ExcludePatterns "'"
     $remoteCmd = "tar -czf -$excludeStr -C '$RemoteParent' '$RemoteLeaf'"
-    $cmdLine = "ssh $PeerHost `"$remoteCmd`" | tar -xzf - -C `"$LocalDest`""
+    $cmdLine = "$SshExe $PeerHost `"$remoteCmd`" | tar -xzf - -C `"$LocalDest`""
     cmd /c $cmdLine
     if ($LASTEXITCODE -ne 0) {
         throw "tar pull failed (exit $LASTEXITCODE)"
@@ -175,7 +184,7 @@ function Invoke-TarPush {
     # local tar runs under cmd.exe, which treats single quotes as literal
     # characters, so local excludes must be double-quoted
     $excludeStr = Get-ExcludeFlagString $ExcludePatterns '"'
-    $cmdLine = "tar -czf -$excludeStr -C `"$LocalParent`" `"$LocalLeaf`" | ssh $PeerHost `"tar -xzf - -C '$RemoteDest'`""
+    $cmdLine = "tar -czf -$excludeStr -C `"$LocalParent`" `"$LocalLeaf`" | $SshExe $PeerHost `"tar -xzf - -C '$RemoteDest'`""
     cmd /c $cmdLine
     if ($LASTEXITCODE -ne 0) {
         throw "tar push failed (exit $LASTEXITCODE)"
@@ -206,13 +215,13 @@ function Invoke-CsvEnsureOnPeer {
         Write-Host "csv-utf8: missing $script, skipping conversion" -ForegroundColor Yellow
         return
     }
-    ssh $PeerHost 'command -v python3' | Out-Null
+    & $SshExe $PeerHost 'command -v python3' | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "csv-utf8: no python3 on $PeerHost, skipping conversion" -ForegroundColor Yellow
         return
     }
     # stream the script over ssh so the peer needs python3 but not this repo
-    $cmdLine = "ssh $PeerHost `"python3 - '$RemotePath'`" < `"$script`""
+    $cmdLine = "$SshExe $PeerHost `"python3 - '$RemotePath'`" < `"$script`""
     cmd /c $cmdLine
     if ($LASTEXITCODE -ne 0) {
         Write-Host "csv-utf8 on $PeerHost failed (exit $LASTEXITCODE)" -ForegroundColor Yellow
@@ -238,7 +247,7 @@ function Invoke-MachineSyncPull {
     if (Test-PeerDirectory $Config.PeerHost $remoteFull) {
         Invoke-TarPull -PeerHost $Config.PeerHost -RemoteParent $split.Parent -RemoteLeaf $split.Leaf -LocalDest $DestDir -ExcludePatterns (Get-ExcludePatterns)
     } else {
-        scp "$($Config.PeerHost):'$remoteFull'" "$DestDir\"
+        & $ScpExe "$($Config.PeerHost):'$remoteFull'" "$DestDir\"
         if ($LASTEXITCODE -ne 0) {
             throw "scp failed (exit $LASTEXITCODE)"
         }
@@ -268,14 +277,14 @@ function Invoke-MachineSyncPush {
     $finalTarget = "$($remoteDest.TrimEnd('/'))/$leafName"
     Confirm-PushDestination -PeerHost $Config.PeerHost -RemoteTarget $finalTarget
 
-    ssh $Config.PeerHost "mkdir -p '$remoteDest'" | Out-Null
+    & $SshExe $Config.PeerHost "mkdir -p '$remoteDest'" | Out-Null
 
     if (Test-Path $localFull -PathType Container) {
         Write-Host "$CommandName $FromValue -> $($Config.PeerHost):$finalTarget"
         Invoke-TarPush -PeerHost $Config.PeerHost -LocalParent (Split-Path $localFull -Parent) -LocalLeaf $leafName -RemoteDest $remoteDest -ExcludePatterns (Get-ExcludePatterns)
     } else {
         Write-Host "$CommandName $FromValue -> $($Config.PeerHost):$remoteDest/"
-        scp $localFull "$($Config.PeerHost):'$remoteDest/'"
+        & $ScpExe $localFull "$($Config.PeerHost):'$remoteDest/'"
         if ($LASTEXITCODE -ne 0) {
             throw "scp failed (exit $LASTEXITCODE)"
         }

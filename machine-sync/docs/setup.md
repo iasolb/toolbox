@@ -69,7 +69,13 @@ Edit the seeded config on each machine, values are documented inline.
 Optional personal ignore list: `~/.machinesync-ignore` (falls back to
 `config/.machinesync-ignore.example`).
 
-## Known quirks (bsdtar on Windows, from real transfers)
+## Known quirks (from real transfers and testing)
+
+- Git for Windows can shadow the native OpenSSH client on PATH (PowerShell
+  resolves `ssh` to `Git\usr\bin\ssh.exe`), and that build cannot resolve
+  `.local` mDNS names. The PowerShell scripts pin
+  `C:\Windows\System32\OpenSSH\ssh.exe`/`scp.exe` explicitly for this
+  reason; if testing by hand from Git Bash, use the full native path.
 
 - NTFS-illegal filename characters are auto-renamed (`::` becomes `__`).
 - macOS `Icon\r` files make the extract fail: delete them first, they are
