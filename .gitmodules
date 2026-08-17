@@ -1,0 +1,13 @@
+[submodule "ai-kit"]
+	path = ai-kit
+	url = https://github.com/iasolb/ai-kit.git
+	branch = main
+[submodule "FRED_Loader"]
+	path = FRED_Loader
+	url = https://github.com/iasolb/FRED_Loader.git
+[submodule "Census_Loader"]
+	path = Census_Loader
+	url = https://github.com/iasolb/Census_Loader.git
+[submodule "ResearchFramework"]
+	path = ResearchFramework
+	url = https://github.com/iasolb/ResearchFramework.git
