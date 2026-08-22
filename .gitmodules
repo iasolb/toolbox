@@ -1,0 +1,3 @@
+[submodule "machine-sync"]
+	path = machine-sync
+	url = https://github.com/iasolb/machine-sync.git

@@ -1,10 +1,45 @@
-# myToolBox
+# cloud-kit
 
-Personal utility toolbox. Each tool is a self-contained subfolder; one clone
-brings the whole kit onto a new machine.
+The cloud surface: moving things between machines. If a tool's job is to get
+something from one box to another, it lives here.
 
-| Tool | What it does |
-| --- | --- |
-| [machine-sync](machine-sync/README.md) | Peer-to-peer file transfer between the Mac and the PC (`pull.mac`/`push.mac` on the PC, `pull.pc`/`push.pc` on the Mac, plus `*.claude` variants targeting the claude working dir) |
-| [csv-utf8](csv-utf8/README.md) | Rewrites non-UTF-8 CSVs as UTF-8 in place; also backs machine-sync's `--csv` flag |
-| [StayinAlive.ps1](StayinAlive.ps1) | Keeps the PC awake |
+Its sibling is `dev-kit`, which holds what you write code WITH. The split is by
+what a thing is for, not by where it runs.
+
+## What is here
+
+| Submodule | What it does |
+|---|---|
+| `machine-sync` | push and pull files between two machines over SSH, with the paths named in config instead of typed |
+
+## Clone
+
+```
+git clone --recursive https://github.com/iasolb/cloud-kit.git
+```
+
+An existing clone picks up the submodules with
+`git submodule update --init --recursive`.
+
+## Related, and deliberately not here
+
+- **`ensure-utf8`** lives in `data-kit`. `machine-sync --csv` runs it over
+  transferred CSVs, resolving the installed command first, so install it with
+  `pip install git+https://github.com/iasolb/data-kit.git` if you want that
+  flag to do anything.
+- **The data loaders and the research framework** live in `research-kit`. They
+  were briefly submodules of this repo, which was a filing mistake: they are
+  research tools, not transfer tools.
+
+## Where this is going
+
+`machine-sync` currently understands exactly two machines. The intended
+replacement is a registry: register a device's SSH address under an alias, then
+register named locations on that device beneath it, so a transfer names two
+machines and a spot rather than a path anyone has to remember.
+
+## Where this fits
+
+The naming convention is `<domain>-kit`. Siblings: `dev-kit` (editor and
+tooling config), `data-kit` (validation, checks, transforms), `research-kit`
+(analysis framework and API wrappers), `ai-kit` (the AI tooling umbrella).
