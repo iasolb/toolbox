@@ -47,7 +47,10 @@ lands at `<to>/<leaf>`, the same way `cp src dir/` works.
   explicit y/N confirm. Pulls overwrite silently (matching the reference
   design: pulls land where you pointed them, pushes are the consequential
   direction).
-- `--csv` runs every transferred `.csv` through `csv-utf8/ensure_utf8.py`
+- `--csv` runs every transferred `.csv` through `ensure-utf8`, which lives in
+  `data-kit` (`pip install git+https://github.com/iasolb/data-kit.git`). It
+  looks for the installed command first, then `MS_CSV_UTF8` if that points at a
+  checkout, and skips with a message if neither is present
   after the transfer (locally for pulls, streamed over ssh for pushes).
 - Guard-pattern failures everywhere: missing config, missing flags, or a
   missing source path exit early with a message, nothing is guessed.

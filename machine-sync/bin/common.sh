@@ -148,10 +148,25 @@ tar_push() {
     COPYFILE_DISABLE=1 tar "${args[@]}" | ssh "$PEER_HOST" "tar -xzf - -C \"$dest\""
 }
 
+# csv-utf8 lives in data-kit since 2026-08-21, not in this repo. Resolution
+# order: the installed console script first, then a checkout path if
+# MS_CSV_UTF8 points at one. Both are optional; --csv degrades to a message.
+csv_utf8_script() {
+    if [ -n "${MS_CSV_UTF8:-}" ] && [ -f "$MS_CSV_UTF8" ]; then
+        echo "$MS_CSV_UTF8"
+    fi
+}
+
 csv_ensure_local() {
-    local target="$1" script="$MS_TOOLBOX_ROOT/csv-utf8/ensure_utf8.py"
-    if [ ! -f "$script" ]; then
-        echo "csv-utf8: missing $script, skipping conversion" >&2
+    local target="$1" script
+    if command -v ensure-utf8 >/dev/null 2>&1; then
+        ensure-utf8 "$target"
+        return $?
+    fi
+    script="$(csv_utf8_script)"
+    if [ -z "$script" ]; then
+        echo 'csv-utf8: no ensure-utf8 on PATH and MS_CSV_UTF8 unset, skipping conversion' >&2
+        echo 'csv-utf8: install it with: pip install git+https://github.com/iasolb/data-kit.git' >&2
         return 0
     fi
     if ! command -v python3 >/dev/null 2>&1; then
@@ -162,9 +177,15 @@ csv_ensure_local() {
 }
 
 csv_ensure_on_peer() {
-    local target="$1" script="$MS_TOOLBOX_ROOT/csv-utf8/ensure_utf8.py"
-    if [ ! -f "$script" ]; then
-        echo "csv-utf8: missing $script, skipping conversion" >&2
+    local target="$1" script
+    # prefer the peer's own installed command, so nothing needs streaming
+    if ssh "$PEER_HOST" "command -v ensure-utf8" >/dev/null 2>&1; then
+        ssh "$PEER_HOST" "ensure-utf8 \"$target\""
+        return $?
+    fi
+    script="$(csv_utf8_script)"
+    if [ -z "$script" ]; then
+        echo "csv-utf8: no ensure-utf8 on $PEER_HOST and MS_CSV_UTF8 unset, skipping conversion" >&2
         return 0
     fi
     # the Store stub on a bare Windows box fails this probe, a real python passes

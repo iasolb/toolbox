@@ -206,11 +206,19 @@ function Invoke-TarPush {
     }
 }
 
+# csv-utf8 lives in data-kit since 2026-08-21, not in this repo. Resolution
+# order: the installed ensure-utf8 command first, then $env:MS_CSV_UTF8 if it
+# points at a checkout. Both optional; --csv degrades to a message.
 function Invoke-CsvEnsureLocal {
     param([string]$TargetPath, [string]$ToolboxRoot)
-    $script = Join-Path $ToolboxRoot 'csv-utf8\ensure_utf8.py'
-    if (-not (Test-Path $script)) {
-        Write-Host "csv-utf8: missing $script, skipping conversion" -ForegroundColor Yellow
+    if (Get-Command ensure-utf8 -ErrorAction SilentlyContinue) {
+        ensure-utf8 $TargetPath
+        return
+    }
+    $script = $env:MS_CSV_UTF8
+    if (-not $script -or -not (Test-Path $script)) {
+        Write-Host 'csv-utf8: no ensure-utf8 on PATH and MS_CSV_UTF8 unset, skipping conversion' -ForegroundColor Yellow
+        Write-Host 'csv-utf8: install it with: pip install git+https://github.com/iasolb/data-kit.git' -ForegroundColor Yellow
         return
     }
     # the Microsoft Store python stub is on PATH even with no real install,
@@ -225,9 +233,15 @@ function Invoke-CsvEnsureLocal {
 
 function Invoke-CsvEnsureOnPeer {
     param([string]$PeerHost, [string]$RemotePath, [string]$ToolboxRoot)
-    $script = Join-Path $ToolboxRoot 'csv-utf8\ensure_utf8.py'
-    if (-not (Test-Path $script)) {
-        Write-Host "csv-utf8: missing $script, skipping conversion" -ForegroundColor Yellow
+    # prefer the peer's own installed command, so nothing needs streaming
+    cmd /c "$SshExe -n $PeerHost `"command -v ensure-utf8`" >nul 2>&1"
+    if ($LASTEXITCODE -eq 0) {
+        cmd /c "$SshExe $PeerHost `"ensure-utf8 '$RemotePath'`""
+        return
+    }
+    $script = $env:MS_CSV_UTF8
+    if (-not $script -or -not (Test-Path $script)) {
+        Write-Host "csv-utf8: no ensure-utf8 on $PeerHost and MS_CSV_UTF8 unset, skipping conversion" -ForegroundColor Yellow
         return
     }
     # actually run python3, not just find it: on a Mac without Xcode CLT the
